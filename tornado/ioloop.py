@@ -783,7 +783,7 @@ class PollIOLoop(IOLoop):
         return self.time_func()
 
     def add_timeout(self, deadline, callback):
-        timeout = _Timeout(deadline, stack_context.wrap(callback), self)
+        timeout = _Timeout(deadline, stack_context.wrap(callback), self, len(self._timeouts))
         heapq.heappush(self._timeouts, timeout)
         return timeout
 
@@ -832,12 +832,12 @@ class PollIOLoop(IOLoop):
 
 
 class _Timeout(object):
-    """An IOLoop timeout, a UNIX timestamp and a callback"""
+    """An IOLoop timeout, a UNIX timestamp, a callback, and the current size of the timeout heap"""
 
     # Reduce memory overhead when there are lots of pending callbacks
     __slots__ = ['deadline', 'callback']
 
-    def __init__(self, deadline, callback, io_loop):
+    def __init__(self, deadline, callback, io_loop, entry_count = None):
         if isinstance(deadline, numbers.Real):
             self.deadline = deadline
         elif isinstance(deadline, datetime.timedelta):
@@ -849,22 +849,32 @@ class _Timeout(object):
         else:
             raise TypeError("Unsupported deadline %r" % deadline)
         self.callback = callback
+        self.entry_count = entry_count
 
     @staticmethod
     def timedelta_to_seconds(td):
         """Equivalent to td.total_seconds() (introduced in python 2.7)."""
         return (td.microseconds + (td.seconds + td.days * 24 * 3600) * 10 ** 6) / float(10 ** 6)
 
-    # Comparison methods to sort by deadline, with object id as a tiebreaker
-    # to guarantee a consistent ordering.  The heapq module uses __le__
-    # in python2.5, and __lt__ in 2.6+ (sort() and most other comparisons
-    # use __lt__).
+    # Comparison methods to sort by deadline, with heap size at creation time
+    # as a tiebreaker to guarantee a consistent ordering if it exists;
+    # otherwise it falls back to id().  The heapq module  uses __le__  in
+    # python2.5, and __lt__ in 2.6+ (sort() and most other comparisons use 
+    # __lt__).
     def __lt__(self, other):
-        return ((self.deadline, id(self)) <
+        if self.entry_count is not None and other.entry_count is not None:
+            return (self.deadline, self.entry_count) <
+                (other.deadline, other.entry_count)
+        else:
+            return ((self.deadline, id(self)) <
                 (other.deadline, id(other)))
 
     def __le__(self, other):
-        return ((self.deadline, id(self)) <=
+        if self.entry_count is not None and other.entry_count is not None:
+            return (self.deadline, self.entry_count) <=
+                (other.deadline, other.entry_count)
+        else:
+            return ((self.deadline, id(self)) <=
                 (other.deadline, id(other)))
 
 
