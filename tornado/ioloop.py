@@ -850,15 +850,15 @@ class _Timeout(object):
             raise TypeError("Unsupported deadline %r" % deadline)
         self.callback = callback
         try:
-            self.entry_count = len(io_loop._timeouts)
-        except (AttributeError, TypeError) as e:
-            #If io_loop doesn't have the _timeouts member, set self.entry_count
-            #to None in order to fall back to using memory address-based
-            #ordering
-            
-            #AttributeError in case _timeouts doesn't exist, TypeError in case
-            #io_loop._timeouts is not an array-like object (e.g. None)
-            self.entry_count = None
+            self.tiebreaker = len(io_loop._timeouts)
+        except (AttributeError, TypeError):
+            #If io_loop doesn't have the _timeouts member, set self.tiebreaker
+            #to to fall back to using memory address-based ordering
+
+            #AttributeError is raised if io_loop._timeouts doesn't exist;
+            #TypeError is raised if io_loop._timeouts is not an array-like
+            #object (e.g. None)
+            self.tiebreaker = id(self)
 
     @staticmethod
     def timedelta_to_seconds(td):
@@ -873,21 +873,12 @@ class _Timeout(object):
 
     #Note that Python treats practically *anything* as being greater than None
     def __lt__(self, other):
-        if self.entry_count is not None or other.entry_count is not None:
-            return (self.deadline, self.entry_count) <
-                (other.deadline, other.entry_count)
-        else:
-            return ((self.deadline, id(self)) <
-                (other.deadline, id(other)))
+        return (self.deadline, self.tiebreaker) <
+                (other.deadline, other.tiebreaker)
 
     def __le__(self, other):
-        if self.entry_count is not None or other.entry_count is not None:
-            return (self.deadline, self.entry_count) <=
-                (other.deadline, other.entry_count)
-        else:
-            return ((self.deadline, id(self)) <=
-                (other.deadline, id(other)))
-
+        return (self.deadline, self.tiebreaker) <=
+                (other.deadline, other.tiebreaker)
 
 class PeriodicCallback(object):
     """Schedules the given callback to be called periodically.
