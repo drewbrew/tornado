@@ -783,7 +783,7 @@ class PollIOLoop(IOLoop):
         return self.time_func()
 
     def add_timeout(self, deadline, callback):
-        timeout = _Timeout(deadline, stack_context.wrap(callback), self, len(self._timeouts))
+        timeout = _Timeout(deadline, stack_context.wrap(callback), self)
         heapq.heappush(self._timeouts, timeout)
         return timeout
 
@@ -837,7 +837,7 @@ class _Timeout(object):
     # Reduce memory overhead when there are lots of pending callbacks
     __slots__ = ['deadline', 'callback']
 
-    def __init__(self, deadline, callback, io_loop, entry_count = None):
+    def __init__(self, deadline, callback, io_loop):
         if isinstance(deadline, numbers.Real):
             self.deadline = deadline
         elif isinstance(deadline, datetime.timedelta):
@@ -849,7 +849,16 @@ class _Timeout(object):
         else:
             raise TypeError("Unsupported deadline %r" % deadline)
         self.callback = callback
-        self.entry_count = entry_count
+        try:
+            self.entry_count = len(io_loop._timeouts)
+        except (AttributeError, TypeError) as e:
+            #If io_loop doesn't have the _timeouts member, set self.entry_count
+            #to None in order to fall back to using memory address-based
+            #ordering
+            
+            #AttributeError in case _timeouts doesn't exist, TypeError in case
+            #io_loop._timeouts is not an array-like object (e.g. None)
+            self.entry_count = None
 
     @staticmethod
     def timedelta_to_seconds(td):
@@ -861,8 +870,10 @@ class _Timeout(object):
     # otherwise it falls back to id().  The heapq module  uses __le__  in
     # python2.5, and __lt__ in 2.6+ (sort() and most other comparisons use 
     # __lt__).
+
+    #Note that Python treats practically *anything* as being greater than None
     def __lt__(self, other):
-        if self.entry_count is not None and other.entry_count is not None:
+        if self.entry_count is not None or other.entry_count is not None:
             return (self.deadline, self.entry_count) <
                 (other.deadline, other.entry_count)
         else:
@@ -870,7 +881,7 @@ class _Timeout(object):
                 (other.deadline, id(other)))
 
     def __le__(self, other):
-        if self.entry_count is not None and other.entry_count is not None:
+        if self.entry_count is not None or other.entry_count is not None:
             return (self.deadline, self.entry_count) <=
                 (other.deadline, other.entry_count)
         else:
